@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mb-4 d-flex justify-content-between align-items-center">
+    <div>
+        <h2 class="fw-bold text-primary"><i class="fas fa-history me-2"></i>Prediction History</h2>
+        <p class="text-muted">Recent price predictions made by users.</p>
+    </div>
+    <a href="{{ url_for('predict_page') }}" class="btn btn-primary">Make a Prediction</a>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Date & Time</th>
+                        <th>Car Details</th>
+                        <th>Age / Km</th>
+                        <th>Specs</th>
+                        <th>Predicted Price</th>
+                    </tr>
+                </thead>
+                <tbody id="historyTableBody">
+                    <tr>
+                        <td colspan="5" class="text-center py-4">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener("DOMContentLoaded", () => {
+        fetch('/api/history')
+            .then(res => res.json())
+            .then(data => {
+                const tbody = document.getElementById('historyTableBody');
+                if(data.success && data.data && data.data.length > 0) {
+                    const formatter = new Intl.NumberFormat('en-IN', {
+                        style: 'currency',
+                        currency: 'INR',
+                        maximumFractionDigits: 0
+                    });
+                    
+                    let html = '';
+                    data.data.forEach(item => {
+                        const date = new Date(item.timestamp).toLocaleString();
+                        html += `
+                            <tr>
+                                <td class="align-middle text-muted small">${date}</td>
+                                <td class="align-middle">
+                                    <strong>${item.brand} ${item.model}</strong><br>
+                                    <span class="badge bg-secondary">${item.fuel_type}</span>
+                                    <span class="badge bg-secondary">${item.transmission_type}</span>
+                                </td>
+                                <td class="align-middle">
+                                    ${item.vehicle_age} yrs<br>
+                                    <span class="text-muted small">${item.km_driven.toLocaleString()} km</span>
+                                </td>
+                                <td class="align-middle">
+                                    ${item.eng} CC<br>
+                                    <span class="text-muted small">${item.max_power} bhp, ${item.seats} seats</span>
+                                </td>
+                                <td class="align-middle">
+                                    <strong class="text-success fs-5">${formatter.format(item.predicted_price)}</strong>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    tbody.innerHTML = html;
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="5" class="text-center py-4 text-muted">No prediction history available yet.</td></tr>`;
+                }
+            })
+            .catch(err => {
+                document.getElementById('historyTableBody').innerHTML = `<tr><td colspan="5" class="text-center py-4 text-danger">Error loading history.</td></tr>`;
+            });
+    });
+</script>
+{% endblock %}

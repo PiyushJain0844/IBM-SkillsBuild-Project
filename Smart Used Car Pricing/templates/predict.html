@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="card shadow-sm border-0">
+            <div class="card-header bg-primary text-white py-3">
+                <h4 class="mb-0"><i class="fas fa-calculator me-2"></i>Price Estimator</h4>
+            </div>
+            <div class="card-body p-4">
+                <p class="text-muted mb-4">Enter the vehicle details below to get an estimated market price based on our machine learning model.</p>
+                
+                <form id="predictionForm">
+                    <div class="row g-3">
+                        <!-- Categorical -->
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Brand</label>
+                            <input type="text" class="form-control" name="brand" placeholder="e.g. Maruti" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Model Name</label>
+                            <input type="text" class="form-control" name="model" placeholder="e.g. Swift" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Full Car Name</label>
+                            <input type="text" class="form-control" name="car_name" placeholder="e.g. Maruti Swift Dzire" required>
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Seller Type</label>
+                            <select class="form-select" name="seller_type" required>
+                                <option value="" disabled selected>Select...</option>
+                                <option value="Individual">Individual</option>
+                                <option value="Dealer">Dealer</option>
+                                <option value="Trustmark Dealer">Trustmark Dealer</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Fuel Type</label>
+                            <select class="form-select" name="fuel_type" required>
+                                <option value="" disabled selected>Select...</option>
+                                <option value="Petrol">Petrol</option>
+                                <option value="Diesel">Diesel</option>
+                                <option value="CNG">CNG</option>
+                                <option value="LPG">LPG</option>
+                                <option value="Electric">Electric</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Transmission</label>
+                            <select class="form-select" name="transmission_type" required>
+                                <option value="" disabled selected>Select...</option>
+                                <option value="Manual">Manual</option>
+                                <option value="Automatic">Automatic</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Numerical -->
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Vehicle Age (Years)</label>
+                            <input type="number" class="form-control" name="vehicle_age" min="0" step="1" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Kilometers Driven</label>
+                            <input type="number" class="form-control" name="km_driven" min="0" step="1" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Mileage (kmpl/kmkg)</label>
+                            <input type="number" class="form-control" name="mileage" min="0" step="0.1" required>
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Engine (CC)</label>
+                            <input type="number" class="form-control" name="eng" min="0" step="1" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Max Power (bhp)</label>
+                            <input type="number" class="form-control" name="max_power" min="0" step="0.1" required>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-bold">Seats</label>
+                            <input type="number" class="form-control" name="seats" min="2" max="10" step="1" required>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4 d-grid">
+                        <button type="submit" class="btn btn-primary btn-lg" id="submitBtn">
+                            <span class="spinner-border spinner-border-sm d-none" id="loadingSpinner" role="status" aria-hidden="true"></span>
+                            Predict Estimated Price
+                        </button>
+                    </div>
+                </form>
+                
+                <div id="resultCard" class="mt-4 alert alert-success d-none shadow-sm">
+                    <h5 class="alert-heading text-center mb-1">Estimated Market Price</h5>
+                    <h2 class="text-center text-success fw-bold mb-3" id="predictedPriceValue"></h2>
+                    <hr>
+                    <p class="mb-0 text-muted small text-center"><i class="fas fa-info-circle me-1"></i><strong>DISCLAIMER:</strong> This prediction is an estimate based on historical data and should not be treated as a guaranteed buying or selling price.</p>
+                </div>
+                
+                <div id="errorCard" class="mt-4 alert alert-danger d-none shadow-sm">
+                    <i class="fas fa-exclamation-triangle me-2"></i><span id="errorMessage"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('predictionForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    // UI state
+    const btn = document.getElementById('submitBtn');
+    const spinner = document.getElementById('loadingSpinner');
+    const resultCard = document.getElementById('resultCard');
+    const errorCard = document.getElementById('errorCard');
+    
+    btn.disabled = true;
+    spinner.classList.remove('d-none');
+    resultCard.classList.add('d-none');
+    errorCard.classList.add('d-none');
+    
+    const formData = new FormData(this);
+    const data = Object.fromEntries(formData.entries());
+    
+    // Convert types
+    const numFields = ['vehicle_age', 'km_driven', 'mileage', 'eng', 'max_power', 'seats'];
+    numFields.forEach(f => {
+        if(data[f]) data[f] = parseFloat(data[f]);
+    });
+    
+    fetch('/api/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    })
+    .then(res => res.json())
+    .then(response => {
+        btn.disabled = false;
+        spinner.classList.add('d-none');
+        
+        if(response.success) {
+            const formatter = new Intl.NumberFormat('en-IN', {
+                style: 'currency',
+                currency: 'INR',
+                maximumFractionDigits: 0
+            });
+            document.getElementById('predictedPriceValue').innerText = formatter.format(response.predicted_price);
+            resultCard.classList.remove('d-none');
+        } else {
+            document.getElementById('errorMessage').innerText = response.message || "An error occurred during prediction.";
+            errorCard.classList.remove('d-none');
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        spinner.classList.add('d-none');
+        document.getElementById('errorMessage').innerText = "Unable to connect to the server. Please check your network.";
+        errorCard.classList.remove('d-none');
+    });
+});
+</script>
+{% endblock %}

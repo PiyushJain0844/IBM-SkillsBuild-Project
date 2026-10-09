@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row align-items-center mb-5">
+    <div class="col-lg-6">
+        <h1 class="display-4 fw-bold text-primary mb-3">Smarter Used Car Pricing</h1>
+        <p class="lead text-muted mb-4">Leverage machine learning to estimate market prices for used vehicles based on historical data. Understand market trends and make informed decisions.</p>
+        <div class="d-flex gap-3">
+            <a href="{{ url_for('predict_page') }}" class="btn btn-primary btn-lg px-4 shadow-sm">Predict Price Now <i class="fas fa-arrow-right ms-2"></i></a>
+            <a href="{{ url_for('analytics_page') }}" class="btn btn-outline-secondary btn-lg px-4">View Analytics</a>
+        </div>
+    </div>
+    <div class="col-lg-6 d-none d-lg-block text-center">
+        <!-- Dashboard illustration placeholder -->
+        <i class="fas fa-chart-line text-primary" style="font-size: 15rem; opacity: 0.8;"></i>
+    </div>
+</div>
+
+<div class="row g-4" id="stats-container">
+    <div class="col-12 text-center">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0 mt-5 bg-light">
+    <div class="card-body p-4 text-center">
+        <h3 class="h4 mb-3">Project Overview</h3>
+        <p class="mb-0 text-muted">AutoValue AI is built using Python, Scikit-learn, and Flask. It analyzes real-world vehicle features like age, kilometers driven, engine capacity, and fuel type to provide data-driven price estimates.</p>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener("DOMContentLoaded", () => {
+        fetch('/api/analytics')
+            .then(res => res.json())
+            .then(data => {
+                if(data.success && data.data.stats) {
+                    const stats = data.data.stats;
+                    const metrics = data.data.metrics ? data.data.metrics.metrics : null;
+                    
+                    let html = `
+                        <div class="col-md-3 col-sm-6">
+                            <div class="card border-0 shadow-sm text-center h-100">
+                                <div class="card-body py-4">
+                                    <div class="text-primary mb-2"><i class="fas fa-database fa-2x"></i></div>
+                                    <h2 class="h1 mb-0 fw-bold">${stats.total_records.toLocaleString()}</h2>
+                                    <p class="text-muted mb-0">Analyzed Vehicles</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3 col-sm-6">
+                            <div class="card border-0 shadow-sm text-center h-100">
+                                <div class="card-body py-4">
+                                    <div class="text-success mb-2"><i class="fas fa-rupee-sign fa-2x"></i></div>
+                                    <h2 class="h2 mb-0 fw-bold">${Math.round(stats.avg_price).toLocaleString()}</h2>
+                                    <p class="text-muted mb-0">Average Price (INR)</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    if (metrics) {
+                        html += `
+                        <div class="col-md-3 col-sm-6">
+                            <div class="card border-0 shadow-sm text-center h-100">
+                                <div class="card-body py-4">
+                                    <div class="text-info mb-2"><i class="fas fa-bullseye fa-2x"></i></div>
+                                    <h2 class="h2 mb-0 fw-bold">${(metrics.R2 * 100).toFixed(1)}%</h2>
+                                    <p class="text-muted mb-0">R² Score</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3 col-sm-6">
+                            <div class="card border-0 shadow-sm text-center h-100">
+                                <div class="card-body py-4">
+                                    <div class="text-warning mb-2"><i class="fas fa-tachometer-alt fa-2x"></i></div>
+                                    <h2 class="h2 mb-0 fw-bold">${Math.round(stats.avg_km_driven).toLocaleString()}</h2>
+                                    <p class="text-muted mb-0">Avg. Km Driven</p>
+                                </div>
+                            </div>
+                        </div>
+                        `;
+                    }
+                    
+                    document.getElementById('stats-container').innerHTML = html;
+                }
+            })
+            .catch(err => {
+                document.getElementById('stats-container').innerHTML = `<div class="col-12"><div class="alert alert-warning">Could not load statistics. Ensure the API is running.</div></div>`;
+            });
+    });
+</script>
+{% endblock %}
