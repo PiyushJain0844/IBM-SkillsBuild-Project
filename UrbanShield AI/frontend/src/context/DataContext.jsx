@@ -1,51 +1,105 @@
-import React, { createContext, useContext, useState } from 'react';
-import { centralStore, INITIAL_ZONES, INITIAL_TEAMS } from '../data/centralStore';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useState
+} from "react";
 
-const DataContext = createContext();
+import * as api from "../services/api";
 
-export const DataProvider = ({ children }) => {
-  const [issues, setIssues] = useState(centralStore.getIssues());
-  const [zones] = useState(INITIAL_ZONES);
-  const [teams] = useState(INITIAL_TEAMS);
+const DataContext = createContext(null);
 
-  const refreshData = () => {
-    setIssues([...centralStore.getIssues()]);
+export function DataProvider({ children }) {
+  const [issues, setIssues] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [zones, setZones] = useState([]);
+  const [connectionStatus, setConnectionStatus] =
+    useState("checking");
+
+  // Load data from the backend.
+  const refreshData = async () => {
+    try {
+      const [reports, summary, hotspots] =
+        await Promise.all([
+          api.getReports(),
+          api.getDashboardSummary(),
+          api.getHotspotsDashboard()
+        ]);
+
+      setIssues(reports);
+      setStats(summary);
+      setZones(hotspots.zones || []);
+
+      setConnectionStatus("connected");
+
+      return reports;
+    } catch (error) {
+      console.error("Backend connection failed:", error);
+
+      setConnectionStatus("disconnected");
+
+      throw error;
+    }
   };
 
-  const addReport = (reportData) => {
-    const created = centralStore.addIssue(reportData);
-    refreshData();
-    return created;
+  useEffect(() => {
+    refreshData().catch(() => {});
+  }, []);
+
+  // Create a report on the backend.
+  const addReport = async (reportData) => {
+    const createdReport = await api.createReport(reportData);
+
+    await refreshData();
+
+    return createdReport;
   };
 
-  const verifyReport = (id, operatorName) => {
-    const updated = centralStore.verifyIssue(id, operatorName);
-    refreshData();
-    return updated;
+  // Verify a report.
+  const verifyReport = async (id, operatorName) => {
+    const updatedReport = await api.verifyReport(
+      id,
+      operatorName
+    );
+
+    await refreshData();
+
+    return updatedReport;
   };
 
-  const updateReportStatus = (id, status, team) => {
-    const updated = centralStore.updateIssueStatus(id, status, team);
-    refreshData();
-    return updated;
-  };
+  // Update report status.
+  const updateReportStatus = async (
+    id,
+    status,
+    assignedTeam
+  ) => {
+    const updatedReport = await api.updateReportStatus(
+      id,
+      status,
+      assignedTeam
+    );
 
-  const stats = centralStore.getSummaryStats();
+    await refreshData();
+
+    return updatedReport;
+  };
 
   return (
-    <DataContext.Provider value={{
-      issues,
-      zones,
-      teams,
-      stats,
-      addReport,
-      verifyReport,
-      updateReportStatus,
-      refreshData
-    }}>
+    <DataContext.Provider
+      value={{
+        issues,
+        stats,
+        zones,
+        connectionStatus,
+        refreshData,
+        addReport,
+        verifyReport,
+        updateReportStatus
+      }}
+    >
       {children}
     </DataContext.Provider>
   );
-};
+}
 
 export const useData = () => useContext(DataContext);

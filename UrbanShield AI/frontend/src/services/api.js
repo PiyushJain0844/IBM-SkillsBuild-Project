@@ -1,183 +1,489 @@
 // UrbanShield AI — API Abstraction Layer
-// Connects to production backend endpoint (VITE_API_BASE_URL) when available,
-// falling back gracefully to mockService for hackathon demonstration.
+// Connects the React frontend to the FastAPI backend.
+// Uses local mock data only when the backend is unavailable.
 
-import { INITIAL_REPORTS, MOCK_HOTSPOTS, MOCK_MODEL_TELEMETRY } from './mockService';
+import {
+  INITIAL_REPORTS,
+  MOCK_HOTSPOTS,
+  MOCK_MODEL_TELEMETRY,
+} from "./mockService";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = (
+  import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"
+).replace(/\/+$/, "");
 
-// In-memory state store for interactive client session updates
-let localReports = [...INITIAL_REPORTS];
+// --------------------------------------------------
+// Common API request helper
+// --------------------------------------------------
 
-export const getReports = async (filters = {}) => {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/reports`);
-    if (res.ok) return await res.json();
-  } catch (err) {
-    // API unavailable — fallback to local state with applied filters
-    console.info("Using local demo store for getReports()");
-  }
+async function apiRequest(endpoint, options = {}) {
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    ...options,
+    headers: {
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...options.headers,
+    },
+  });
 
-  let filtered = [...localReports];
-  if (filters.category && filters.category !== "All") {
-    filtered = filtered.filter(r => r.category === filters.category);
-  }
-  if (filters.severity && filters.severity !== "All") {
-    filtered = filtered.filter(r => r.severity === filters.severity);
-  }
-  if (filters.status && filters.status !== "All") {
-    filtered = filtered.filter(r => r.status === filters.status);
-  }
-  if (filters.zone && filters.zone !== "All") {
-    filtered = filtered.filter(r => r.zone === filters.zone);
-  }
-  if (filters.search) {
-    const query = filters.search.toLowerCase();
-    filtered = filtered.filter(r => 
-      r.id.toLowerCase().includes(query) || 
-      r.title.toLowerCase().includes(query) ||
-      r.address.toLowerCase().includes(query)
+  if (!response.ok) {
+    const message = await response.text();
+
+    throw new Error(
+      `API request failed (${response.status}): ${message}`
     );
   }
-  return filtered;
-};
 
-export const getReportById = async (id) => {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/reports/${id}`);
-    if (res.ok) return await res.json();
-  } catch (err) {
-    console.info(`Using local demo store for getReportById(${id})`);
-  }
-  return localReports.find(r => r.id === id) || null;
-};
-
-export const createReport = async (reportData) => {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/reports`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(reportData)
-    });
-    if (res.ok) return await res.json();
-  } catch (err) {
-    console.info("Using local demo store for createReport()");
+  if (response.status === 204) {
+    return null;
   }
 
-  // Simulate AI Computer Vision Triage Engine
-  const newId = `US-${1050 + localReports.length + 1}`;
-  const mockConfidence = 0.89 + (Math.random() * 0.08);
-  const mockPriority = Math.floor(75 + Math.random() * 20);
+  return response.json();
+}
 
-  const newReport = {
-    id: newId,
-    category: reportData.category || "Waste Overflow",
-    title: reportData.title || `${reportData.category || "Civic Defect"} Reported`,
-    description: reportData.description || "Citizen submitted issue.",
-    image: reportData.image || "https://images.unsplash.com/photo-1530587191325-3db32d826c18?q=80&w=800&auto=format&fit=crop",
-    latitude: parseFloat(reportData.latitude) || 28.6139,
-    longitude: parseFloat(reportData.longitude) || 77.2090,
-    zone: reportData.zone || "Zone 02 — Central District",
+// --------------------------------------------------
+// Local demo store
+// --------------------------------------------------
+
+let localReports = INITIAL_REPORTS.map((report) => ({ ...report }));
+
+const isBackendConfigured = Boolean(
+  import.meta.env.VITE_API_BASE_URL
+);
+
+const shouldUseDemoFallback = () =>
+  import.meta.env.DEV || !isBackendConfigured;
+
+function handleApiError(error, operation) {
+  console.error(`[UrbanShield API] ${operation} failed:`, error);
+}
+
+// --------------------------------------------------
+// Normalize backend response fields for the frontend
+// --------------------------------------------------
+
+function normalizeReport(report) {
+  if (!report) return report;
+
+  return {
+    ...report,
+
+    // Preserve backend names and provide aliases
+    // for components that use the older frontend names.
+    predictedCategory:
+      report.predictedCategory ?? report.aiPrediction ?? report.category,
+
+    confidence:
+      report.confidence ?? report.aiConfidence ?? 0,
+
+    aiConfidence:
+      report.aiConfidence ?? report.confidence ?? 0,
+
+    assignedTo:
+      report.assignedTo ?? report.assignedTeam ?? null,
+
+    assignedTeam:
+      report.assignedTeam ?? report.assignedTo ?? null,
+
+    createdAt:
+      report.createdAt ?? report.reportedAt ?? null,
+
+    isVerifiedByHuman:
+      report.isVerifiedByHuman ??
+      Boolean(report.verifiedBy),
+
+    history: Array.isArray(report.history) ? report.history : [],
+  };
+}
+
+// --------------------------------------------------
+// Reports
+// --------------------------------------------------
+
+export async function getReports(filters = {}) {
+  const params = new URLSearchParams();
+
+  Object.entries(filters).forEach(([key, value]) => {
+    if (
+      value !== undefined &&
+      value !== null &&
+      value !== "" &&
+      value !== "All"
+    ) {
+      params.set(key, value);
+    }
+  });
+
+  const query = params.toString();
+
+  try {
+    const reports = await apiRequest(
+      `/api/reports${query ? `?${query}` : ""}`
+    );
+
+    return reports.map(normalizeReport);
+  } catch (error) {
+    handleApiError(error, "getReports");
+
+    if (!shouldUseDemoFallback()) {
+      throw error;
+    }
+
+    let filtered = [...localReports];
+
+    if (filters.category && filters.category !== "All") {
+      filtered = filtered.filter(
+        (report) => report.category === filters.category
+      );
+    }
+
+    if (filters.severity && filters.severity !== "All") {
+      filtered = filtered.filter(
+        (report) => report.severity === filters.severity
+      );
+    }
+
+    if (filters.status && filters.status !== "All") {
+      filtered = filtered.filter(
+        (report) => report.status === filters.status
+      );
+    }
+
+    if (filters.zone && filters.zone !== "All") {
+      filtered = filtered.filter(
+        (report) => report.zone === filters.zone
+      );
+    }
+
+    if (filters.search) {
+      const queryText = filters.search.toLowerCase();
+
+      filtered = filtered.filter((report) =>
+        [
+          report.id,
+          report.title,
+          report.address,
+          report.description,
+        ]
+          .filter(Boolean)
+          .some((value) =>
+            String(value).toLowerCase().includes(queryText)
+          )
+      );
+    }
+
+    return filtered.map(normalizeReport);
+  }
+}
+
+export async function getReportById(id) {
+  try {
+    const report = await apiRequest(
+      `/api/reports/${encodeURIComponent(id)}`
+    );
+
+    return normalizeReport(report);
+  } catch (error) {
+    handleApiError(error, "getReportById");
+
+    if (!shouldUseDemoFallback()) {
+      throw error;
+    }
+
+    return normalizeReport(
+      localReports.find((report) => report.id === id) ?? null
+    );
+  }
+}
+
+// --------------------------------------------------
+// Create a civic report
+// --------------------------------------------------
+
+export async function createReport(reportData) {
+  // Match backend ReportCreateRequest field names.
+  const payload = {
+    category: reportData.category || "Road Damage",
+    title:
+      reportData.title ||
+      `${reportData.category || "Civic Issue"} Reported`,
+    description:
+      reportData.description || "Citizen reported civic issue.",
+    image: reportData.image || "",
+    latitude: Number(reportData.latitude ?? 28.6139),
+    longitude: Number(reportData.longitude ?? 77.209),
+    zone: reportData.zone || "Zone 02 — Central Business District",
     address: reportData.address || "Sector 14, City Center",
-    predictedCategory: reportData.category || "Waste Overflow",
-    confidence: parseFloat(mockConfidence.toFixed(2)),
+    reportedBy: reportData.reportedBy || "Citizen",
     severity: reportData.severity || "High",
-    priorityScore: mockPriority,
-    status: "AI Triaged",
-    isVerifiedByHuman: false,
-    verifiedBy: null,
-    verifiedAt: null,
-    assignedTo: null,
-    assignedAt: null,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    aiReasoning: "Visual anomaly patterns detected matching trained civic issue signatures.",
-    recommendedNextAction: "Verify visual evidence and route to municipal team.",
-    history: [
-      { status: "Submitted", timestamp: new Date().toISOString(), actor: "Citizen (App)", notes: "Report logged." },
-      { status: "AI Triaged", timestamp: new Date().toISOString(), actor: "UrbanShield Vision Engine v1.2", notes: `AI Triaged (${Math.round(mockConfidence*100)}% confidence).` }
-    ]
   };
 
-  localReports.unshift(newReport);
-  return newReport;
-};
-
-export const verifyReport = async (id, operatorName = "Authority Operator") => {
   try {
-    const res = await fetch(`${API_BASE_URL}/api/reports/${id}/verify`, { method: 'PATCH' });
-    if (res.ok) return await res.json();
-  } catch (err) {
-    console.info(`Using local demo store for verifyReport(${id})`);
-  }
-
-  const idx = localReports.findIndex(r => r.id === id);
-  if (idx !== -1) {
-    const updated = {
-      ...localReports[idx],
-      status: "Verified",
-      isVerifiedByHuman: true,
-      verifiedBy: operatorName,
-      verifiedAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      history: [
-        ...localReports[idx].history,
-        { status: "Verified", timestamp: new Date().toISOString(), actor: operatorName, notes: "Human verification confirmed." }
-      ]
-    };
-    localReports[idx] = updated;
-    return updated;
-  }
-  return null;
-};
-
-export const updateReportStatus = async (id, newStatus, assignee = null) => {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/reports/${id}/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus, assignee })
+    const created = await apiRequest("/api/reports", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
-    if (res.ok) return await res.json();
-  } catch (err) {
-    console.info(`Using local demo store for updateReportStatus(${id})`);
+
+    return normalizeReport(created);
+  } catch (error) {
+    handleApiError(error, "createReport");
+
+    // In production, do not silently claim the report was saved.
+    if (!shouldUseDemoFallback()) {
+      throw error;
+    }
   }
 
-  const idx = localReports.findIndex(r => r.id === id);
-  if (idx !== -1) {
-    const updated = {
-      ...localReports[idx],
-      status: newStatus,
-      assignedTo: assignee || localReports[idx].assignedTo,
-      assignedAt: assignee ? new Date().toISOString() : localReports[idx].assignedAt,
-      updatedAt: new Date().toISOString(),
-      history: [
-        ...localReports[idx].history,
-        { status: newStatus, timestamp: new Date().toISOString(), actor: "Authority Admin", notes: assignee ? `Assigned to ${assignee}` : `Status changed to ${newStatus}` }
-      ]
-    };
-    localReports[idx] = updated;
-    return updated;
-  }
-  return null;
-};
+  // Local demonstration fallback.
+  // These values are illustrative, not actual model predictions.
+  const now = new Date().toISOString();
 
-export const getDashboardSummary = async () => {
-  const reports = await getReports();
-  const critical = reports.filter(r => r.severity === 'Critical').length;
-  const pending = reports.filter(r => r.status === 'Pending Verification' || r.status === 'AI Triaged').length;
-  const resolved = reports.filter(r => r.status === 'Resolved').length;
+  const mockConfidence = Number(
+    (0.89 + Math.random() * 0.08).toFixed(2)
+  );
+
+  const mockPriority = Math.floor(75 + Math.random() * 20);
+
+  const newReport = normalizeReport({
+    id: `DEMO-${Date.now()}`,
+    ...payload,
+    aiPrediction: payload.category,
+    aiConfidence: mockConfidence,
+    severity: payload.severity,
+    priorityScore: mockPriority,
+    status: "AI Triaged",
+    assignedTeam: null,
+    verifiedBy: null,
+    verifiedAt: null,
+    reportedAt: now,
+    aiReasoning: "Illustrative demo result; not a measured model prediction.",
+    recommendedNextAction:
+      "Review the evidence and verify the report.",
+    recurrenceCount: 1,
+    history: [
+      {
+        status: "Submitted",
+        timestamp: now,
+        actor: "Citizen",
+        notes: "Local demo report created.",
+      },
+    ],
+  });
+
+  localReports.unshift(newReport);
+
+  return newReport;
+}
+
+// --------------------------------------------------
+// Human verification
+// --------------------------------------------------
+
+export async function verifyReport(
+  id,
+  operatorName = "Authority Operator"
+) {
+  try {
+    const updated = await apiRequest(
+      `/api/reports/${encodeURIComponent(id)}/verify`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          operatorName,
+          notes: "Human verification completed.",
+        }),
+      }
+    );
+
+    return normalizeReport(updated);
+  } catch (error) {
+    handleApiError(error, "verifyReport");
+
+    if (!shouldUseDemoFallback()) {
+      throw error;
+    }
+  }
+
+  const index = localReports.findIndex(
+    (report) => report.id === id
+  );
+
+  if (index === -1) return null;
+
+  const now = new Date().toISOString();
+
+  const updated = normalizeReport({
+    ...localReports[index],
+    status: "Verified",
+    verifiedBy: operatorName,
+    verifiedAt: now,
+    isVerifiedByHuman: true,
+    updatedAt: now,
+    history: [
+      ...(localReports[index].history || []),
+      {
+        status: "Verified",
+        timestamp: now,
+        actor: operatorName,
+        notes: "Local demo verification.",
+      },
+    ],
+  });
+
+  localReports[index] = updated;
+
+  return updated;
+}
+
+// --------------------------------------------------
+// Update status and assign a field team
+// --------------------------------------------------
+
+export async function updateReportStatus(
+  id,
+  newStatus,
+  assignedTeam = null
+) {
+  try {
+    const updated = await apiRequest(
+      `/api/reports/${encodeURIComponent(id)}/status`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: newStatus,
+          assignedTeam,
+          notes: assignedTeam
+            ? `Assigned to ${assignedTeam}`
+            : `Status changed to ${newStatus}`,
+        }),
+      }
+    );
+
+    return normalizeReport(updated);
+  } catch (error) {
+    handleApiError(error, "updateReportStatus");
+
+    if (!shouldUseDemoFallback()) {
+      throw error;
+    }
+  }
+
+  const index = localReports.findIndex(
+    (report) => report.id === id
+  );
+
+  if (index === -1) return null;
+
+  const now = new Date().toISOString();
+
+  const updated = normalizeReport({
+    ...localReports[index],
+    status: newStatus,
+    assignedTeam:
+      assignedTeam ?? localReports[index].assignedTeam,
+    updatedAt: now,
+    history: [
+      ...(localReports[index].history || []),
+      {
+        status: newStatus,
+        timestamp: now,
+        actor: "Authority Operator",
+        notes: assignedTeam
+          ? `Assigned to ${assignedTeam}`
+          : `Status changed to ${newStatus}`,
+      },
+    ],
+  });
+
+  localReports[index] = updated;
+
+  return updated;
+}
+
+// --------------------------------------------------
+// Dashboard summary
+// --------------------------------------------------
+
+export async function getDashboardSummary() {
+  try {
+    return await apiRequest("/api/dashboard/summary");
+  } catch (error) {
+    handleApiError(error, "getDashboardSummary");
+
+    if (!shouldUseDemoFallback()) {
+      throw error;
+    }
+  }
+
+  const reports = localReports;
 
   return {
     totalReports: reports.length,
-    criticalIssues: critical,
-    pendingVerification: pending,
-    resolvedCount: resolved,
-    avgResolutionTime: "4.2 Hours (Demo Metric)",
-    hotspots: MOCK_HOTSPOTS
+    criticalIssues: reports.filter(
+      (report) => report.severity === "Critical"
+    ).length,
+    pendingVerification: reports.filter(
+      (report) =>
+        report.status === "Pending Verification" ||
+        report.status === "AI Triaged"
+    ).length,
+    resolvedCount: reports.filter(
+      (report) => report.status === "Resolved"
+    ).length,
+    avgResolutionTime: null,
+    demoMode: true,
   };
-};
+}
 
-export const getModelMonitor = async () => {
-  return MOCK_MODEL_TELEMETRY;
-};
+// --------------------------------------------------
+// Predictive hotspots
+// --------------------------------------------------
+
+export async function getHotspotsDashboard() {
+  try {
+    return await apiRequest("/api/dashboard/hotspots");
+  } catch (error) {
+    handleApiError(error, "getHotspotsDashboard");
+
+    if (!shouldUseDemoFallback()) {
+      throw error;
+    }
+
+    return {
+      zones: MOCK_HOTSPOTS,
+      demoMode: true,
+    };
+  }
+}
+
+// --------------------------------------------------
+// Model monitor
+// --------------------------------------------------
+
+export async function getModelMonitor() {
+  // Your current backend does not expose a model-monitor endpoint.
+  // Keep the telemetry explicitly identified as demo data.
+  return {
+    ...MOCK_MODEL_TELEMETRY,
+    demoMode: true,
+  };
+}
+
+// --------------------------------------------------
+// Backend health check
+// --------------------------------------------------
+
+export async function checkBackend() {
+  return apiRequest("/health");
+}
+
+export default {
+  getReports,
+  getReportById,
+  createReport,
+  verifyReport,
+  updateReportStatus,
+  getDashboardSummary,
+  getHotspotsDashboard,
+  getModelMonitor,
+  checkBackend,
+}; 
